@@ -62,6 +62,7 @@ async function init() {
     const path = jspath.join(process.cwd(), dir!);
     await updateLocations(path);
     fs.writeFile('./files.json', JSON.stringify(fileLocations));
+    console.log(fileLocations.length);
   } catch (error) {
     console.error('ERROR - init():', error);
     process.exit();
