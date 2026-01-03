@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import Bun from 'bun';
 import jspath from 'path';
 
 async function checkIsFolder(path: string) {
@@ -76,7 +77,11 @@ async function updateLocations(path: string) {
       const [isFile, fileSize] = await checkIsFile(filePath);
       const isMedia = await checkIsMedia(filePath);
       if (isFile && isMedia) {
-        fileLocations.push({ path: filePath, fileName: file, fileSize });
+        const splitFile = file.split('.');
+        const extension = splitFile.at(-1);
+        splitFile.splice(splitFile.length - 1, 1);
+        const fileName = splitFile.join('.') + Bun.randomUUIDv7() + '.' + extension;
+        fileLocations.push({ path: filePath, fileName, fileSize });
       }
       const isFolder = await checkIsFolder(filePath);
       if (isFolder) {
@@ -111,14 +116,12 @@ async function init() {
     const path = jspath.join(process.cwd(), dir!);
     const destination = jspath.join(process.cwd(), dest!);
     await updateLocations(path);
-    console.log('Saving to file');
-    await fs.writeFile('./files.json', JSON.stringify(fileLocations));
     console.log('Copying files to location');
-    const batchFileLocations = chunkArray(fileLocations, 10_000);
+    const batchFileLocations = chunkArray<FileLocation>(fileLocations, 10_000);
     for (let [index, files] of batchFileLocations.entries()) {
-      const chunkedFiles = chunkArray(files, 10);
+      const chunkedFiles = chunkArray<FileLocation>(files, 10);
       const directoryLocation = jspath.join(destination, (index + 1).toString());
-      const hasDirectoryLocation = checkIsFolder(directoryLocation);
+      const hasDirectoryLocation = await checkIsFolder(directoryLocation);
       if (!hasDirectoryLocation) {
         await fs.mkdir(directoryLocation);
       }
@@ -127,8 +130,6 @@ async function init() {
           await copyFileRetry(file.path, jspath.join(directoryLocation, file.fileName), 3, 100);
         }))
       }
-      console.clear();
-      console.log(`Copying files ${index + 1}/${fileLocations.length}`);
     }
   } catch (error) {
     console.error('ERROR - init():', error);
