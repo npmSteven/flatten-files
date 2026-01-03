@@ -87,6 +87,22 @@ async function updateLocations(path: string) {
   }
 }
 
+async function copyFileRetry(srcPath: string, destPath: string, retryAttempts: number, delay: number) {
+  for (let i = 0; i < retryAttempts; i++) {
+    try {
+      await fs.copyFile(srcPath, destPath);
+      return;
+    } catch (error) {
+      const isLastAttempt = i === retryAttempts - 1;
+      if (!isLastAttempt) {
+        await new Promise((res) => setTimeout(res, delay * (i + 1)));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 async function init() {
   try {
     // Generate list of files
@@ -102,10 +118,13 @@ async function init() {
     for (let [index, files] of batchFileLocations.entries()) {
       const chunkedFiles = chunkArray(files, 10);
       const directoryLocation = jspath.join(destination, (index + 1).toString());
-      await fs.mkdir(directoryLocation);
+      const hasDirectoryLocation = checkIsFolder(directoryLocation);
+      if (!hasDirectoryLocation) {
+        await fs.mkdir(directoryLocation);
+      }
       for (let files of chunkedFiles) {
         await Promise.all(files.map(async file => {
-          await fs.copyFile(file.path, jspath.join(directoryLocation, file.fileName));
+          await copyFileRetry(file.path, jspath.join(directoryLocation, file.fileName), 3, 100);
         }))
       }
       console.clear();
