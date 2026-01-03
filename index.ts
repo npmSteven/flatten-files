@@ -12,31 +12,35 @@ async function checkIsFolder(path: string) {
 
 async function checkIsFile(path: string) {
   const stat = await fs.stat(path);
-  return stat.isFile();
+  return [stat.isFile(), stat.size] as [boolean, number];
 }
 
 function validateFlags() {
   // provided valid flag
-  const dirIndex = process.argv.findIndex(flag => flag.startsWith('--dir='));
-  const hasDir = dirIndex !== -1;
-  if (!hasDir) {
-    throw Error('You must provide --dir=<directory>');
+  const srcIndex = process.argv.findIndex(flag => flag.startsWith('--src='));
+  const hasSrc = srcIndex !== -1;
+  if (!hasSrc) {
+    throw Error('You must provide --src=<source>');
   }
   const destIndex = process.argv.findIndex(flag => flag.startsWith('--dest='));
-  const hasDest = dirIndex !== -1;
+  const hasDest = destIndex !== -1;
   if (!hasDest) {
     throw Error('You must provide --dest=<destionation>');
   }
   // Check if dir is valid
-  const dir = process.argv[dirIndex]?.split('=')[1];
-  const dest = process.argv[destIndex]?.split('=')[1];
+  const dir = process.argv[srcIndex]?.split('=')[1] as string;
+  const dest = process.argv[destIndex]?.split('=')[1] as string;
   return {
     dir,
     dest,
   };
 }
 
-const fileLocations: { path: string; fileName: string }[] = [];
+type FileLocation = {
+  path: string; fileName: string; fileSize: number;
+}
+
+const fileLocations: FileLocation[] = [];
 
 async function checkIsMedia(path: string) {
   const fileExtension = path.split('.').at(-1)?.toLowerCase();
@@ -52,22 +56,35 @@ function logStatus() {
   console.log('Generating list of files', fileLocations.length);
 }
 
+function chunkArray<T>(array: T[], size: number) {
+  const results = [];
+  let i = 0;
+  while (i < array.length) {
+    results.push(array.slice(i, i + size));
+    i += size;
+  }
+  return results;
+}
+
 async function updateLocations(path: string) {
   logStatus();
-  const list = await fs.readdir(path);
-  for (let name of list) {
-    const item = jspath.join(path, name);
-    const isFile = await checkIsFile(item);
-    const isMedia = await checkIsMedia(item);
-    if (isFile && isMedia) {
-      fileLocations.push({ path: item, fileName: name });
-    }
-    const isFolder = await checkIsFolder(item);
-    if (isFolder) {
-      await updateLocations(item);
-    }
+  const files = await fs.readdir(path);
+  const chunkedFiles = chunkArray<string>(files, 10);
+  for (let items of chunkedFiles) {
+    await Promise.all(items.map(async (file) => {
+      const filePath = jspath.join(path, file);
+      const [isFile, fileSize] = await checkIsFile(filePath);
+      const isMedia = await checkIsMedia(filePath);
+      if (isFile && isMedia) {
+        fileLocations.push({ path: filePath, fileName: file, fileSize });
+      }
+      const isFolder = await checkIsFolder(filePath);
+      if (isFolder) {
+        await updateLocations(filePath);
+      }
+    }));
+    logStatus();
   }
-  logStatus();
 }
 
 async function init() {
@@ -81,10 +98,18 @@ async function init() {
     console.log('Saving to file');
     await fs.writeFile('./files.json', JSON.stringify(fileLocations));
     console.log('Copying files to location');
-    for (let [index, file] of fileLocations.entries()) {
-      await fs.copyFile(file.path, jspath.join(destination, file.fileName));
+    const batchFileLocations = chunkArray(fileLocations, 10_000);
+    for (let [index, files] of batchFileLocations.entries()) {
+      const chunkedFiles = chunkArray(files, 10);
+      const directoryLocation = jspath.join(destination, (index + 1).toString());
+      await fs.mkdir(directoryLocation);
+      for (let files of chunkedFiles) {
+        await Promise.all(files.map(async file => {
+          await fs.copyFile(file.path, jspath.join(directoryLocation, file.fileName));
+        }))
+      }
       console.clear();
-      console.log(`(${index + 1}/${fileLocations.length}) Copying`, file.path, 'to', jspath.join(destination, file.fileName));
+      console.log(`Copying files ${index + 1}/${fileLocations.length}`);
     }
   } catch (error) {
     console.error('ERROR - init():', error);
