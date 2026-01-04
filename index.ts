@@ -21,8 +21,9 @@ async function checkIsFolder(path: string) {
 }
 
 async function checkIsFile(path: string) {
+  const isMedia = checkIsMedia(path);
   const stat = await fs.stat(path);
-  const isFile = stat.isFile();
+  const isFile = stat.isFile() && isMedia;
   let hash = null;
   if (isFile) {
     hash = await getFileFingerpirnt(path);
@@ -57,7 +58,7 @@ type FileLocation = {
 
 const fileLocations: FileLocation[] = [];
 
-async function checkIsMedia(path: string) {
+function checkIsMedia(path: string) {
   const fileExtension = path.split('.').at(-1)?.toLowerCase();
   const validMedia = ['jpg', 'png', 'heic', 'mp4', 'jpeg', 'mov'];
   const isValidMedia = validMedia.findIndex(extension => {
@@ -88,8 +89,8 @@ async function updateLocations(path: string) {
   for (let items of chunkedFiles) {
     await Promise.all(items.map(async (file) => {
       const filePath = jspath.join(path, file);
-      const [[isFile, fileSize, hash], isMedia] = await Promise.all([checkIsFile(filePath), checkIsMedia(filePath)]);
-      if (isFile && isMedia) {
+      const [isFile, fileSize, hash] = await checkIsFile(filePath);
+      if (isFile) {
         const splitFile = file.split('.');
         const extension = splitFile.at(-1);
         splitFile.splice(splitFile.length - 1, 1);
