@@ -6,9 +6,12 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 
 
 
-async function getFileFingerpirnt(filePath: string) {
-  const buffer = await fs.readFile(filePath);
-  return bytesToHex(blake3(buffer));
+async function getFileFingerprint(filePath: string) {
+  const file = Bun.file(filePath);
+  const size = file.size;
+  const sampleBuffer = await file.slice(0, 16384).arrayBuffer();
+  const sampleHash = bytesToHex(blake3(new Uint8Array(sampleBuffer)));
+  return `${size}-${sampleHash}`;
 }
 
 async function checkIsFolder(path: string) {
@@ -26,7 +29,7 @@ async function checkIsFile(path: string) {
   const isFile = stat.isFile() && isMedia;
   let hash = null;
   if (isFile) {
-    hash = await getFileFingerpirnt(path);
+    hash = await getFileFingerprint(path);
   }
   return [isFile, stat.size ?? 0, hash] as [boolean, number, string | null];
 }
