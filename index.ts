@@ -1,24 +1,14 @@
 import fs from 'fs/promises';
-import fsOld from 'fs';
-import crypto from 'crypto';
 import Bun from 'bun';
 import jspath from 'path';
-import { pipeline } from 'stream/promises';
+import { blake3 } from '@noble/hashes/blake3.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
+
+
 
 async function getFileFingerpirnt(filePath: string) {
-  const hash = crypto.createHash('md5');
-  const stream = fsOld.createReadStream(filePath);
-
-  try {
-    await pipeline(stream, async function* (source) {
-      for await (const chunk of source) {
-        hash.update(chunk);
-      }
-    })
-    return hash.digest('hex');
-  } catch (error) {
-    return null;
-  }
+  const buffer = await fs.readFile(filePath);
+  return bytesToHex(blake3(buffer));
 }
 
 async function checkIsFolder(path: string) {
@@ -96,8 +86,7 @@ async function updateLocations(path: string) {
   for (let items of chunkedFiles) {
     await Promise.all(items.map(async (file) => {
       const filePath = jspath.join(path, file);
-      const [isFile, fileSize, hash] = await checkIsFile(filePath);
-      const isMedia = await checkIsMedia(filePath);
+      const [[isFile, fileSize, hash], isMedia] = await Promise.all([checkIsFile(filePath), checkIsMedia(filePath)]);
       if (isFile && isMedia) {
         const splitFile = file.split('.');
         const extension = splitFile.at(-1);
@@ -107,10 +96,11 @@ async function updateLocations(path: string) {
         if (!alreadyExists) {
           fileLocations.push({ path: filePath, fileName, fileSize, hash });
         }
-      }
-      const isFolder = await checkIsFolder(filePath);
-      if (isFolder) {
-        await updateLocations(filePath);
+      } else {
+        const isFolder = await checkIsFolder(filePath);
+        if (isFolder) {
+          await updateLocations(filePath);
+        }
       }
     }));
     logStatus();
