@@ -21,11 +21,13 @@ async function checkIsFolder(path: string) {
 }
 
 async function checkIsFile(path: string) {
-  const [stat, hash] = await Promise.all([
-    fs.stat(path),
-    getFileFingerpirnt(path),
-  ]);
-  return [stat.isFile(), stat.size, hash] as [boolean, number, string | null];
+  const stat = await fs.stat(path);
+  const isFile = stat.isFile();
+  let hash = null;
+  if (isFile) {
+    hash = await getFileFingerpirnt(path);
+  }
+  return [isFile, stat.size ?? 0, hash] as [boolean, number, string | null];
 }
 
 function validateFlags() {
@@ -135,7 +137,7 @@ async function init() {
     console.log('Copying files to location');
     const batchFileLocations = chunkArray<FileLocation>(fileLocations, 10_000);
     for (let [index, files] of batchFileLocations.entries()) {
-      const chunkedFiles = chunkArray<FileLocation>(files, 10);
+      const chunkedFiles = chunkArray<FileLocation>(files, 50);
       const directoryLocation = jspath.join(destination, (index + 1).toString());
       const hasDirectoryLocation = await checkIsFolder(directoryLocation);
       if (!hasDirectoryLocation) {
