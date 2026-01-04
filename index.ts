@@ -63,7 +63,7 @@ type FileLocation = {
   path: string; fileName: string; fileSize: number; hash: string | null
 }
 
-let fileLocations: FileLocation[] = [];
+const fileLocations: FileLocation[] = [];
 
 async function checkIsMedia(path: string) {
   const fileExtension = path.split('.').at(-1)?.toLowerCase();
@@ -103,7 +103,10 @@ async function updateLocations(path: string) {
         const extension = splitFile.at(-1);
         splitFile.splice(splitFile.length - 1, 1);
         const fileName = splitFile.join('.') + Bun.randomUUIDv7() + '.' + extension;
-        fileLocations.push({ path: filePath, fileName, fileSize, hash });
+        const alreadyExists = fileLocations.findIndex(f => f.hash === hash) !== -1;
+        if (!alreadyExists) {
+          fileLocations.push({ path: filePath, fileName, fileSize, hash });
+        }
       }
       const isFolder = await checkIsFolder(filePath);
       if (isFolder) {
@@ -138,15 +141,6 @@ async function init() {
     const path = jspath.join(process.cwd(), dir!);
     const destination = jspath.join(process.cwd(), dest!);
     await updateLocations(path);
-
-    // deduplicate file locations
-    fileLocations = fileLocations.reduce((acc, file) => {
-      const alreadyExists = acc.find(f => f.hash === file.hash);
-      if (!alreadyExists) {
-        acc.push(file);
-      }
-      return acc;
-    }, [] as FileLocation[]);
 
     console.log('Copying files to location');
     const batchFileLocations = chunkArray<FileLocation>(fileLocations, 10_000);
