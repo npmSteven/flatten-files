@@ -1,6 +1,25 @@
 import fs from 'fs/promises';
+import fsOld from 'fs';
+import crypto from 'crypto';
 import Bun from 'bun';
 import jspath from 'path';
+import { pipeline } from 'stream/promises';
+
+async function getFileFingerpirnt(filePath: string) {
+  const hash = crypto.createHash('md5');
+  const stream = fsOld.createReadStream(filePath);
+
+  try {
+    await pipeline(stream, async function* (source) {
+      for await (const chunk of source) {
+        hash.update(chunk);
+      }
+    })
+    return hash.digest('hex');
+  } catch (error) {
+    return null;
+  }
+}
 
 async function checkIsFolder(path: string) {
   try {
@@ -12,8 +31,11 @@ async function checkIsFolder(path: string) {
 }
 
 async function checkIsFile(path: string) {
-  const stat = await fs.stat(path);
-  return [stat.isFile(), stat.size] as [boolean, number];
+  const [stat, hash] = await Promise.all([
+    fs.stat(path),
+    getFileFingerpirnt(path),
+  ]);
+  return [stat.isFile(), stat.size, hash] as [boolean, number, string | null];
 }
 
 function validateFlags() {
@@ -38,10 +60,10 @@ function validateFlags() {
 }
 
 type FileLocation = {
-  path: string; fileName: string; fileSize: number;
+  path: string; fileName: string; fileSize: number; hash: string | null
 }
 
-const fileLocations: FileLocation[] = [];
+let fileLocations: FileLocation[] = [];
 
 async function checkIsMedia(path: string) {
   const fileExtension = path.split('.').at(-1)?.toLowerCase();
@@ -74,14 +96,14 @@ async function updateLocations(path: string) {
   for (let items of chunkedFiles) {
     await Promise.all(items.map(async (file) => {
       const filePath = jspath.join(path, file);
-      const [isFile, fileSize] = await checkIsFile(filePath);
+      const [isFile, fileSize, hash] = await checkIsFile(filePath);
       const isMedia = await checkIsMedia(filePath);
       if (isFile && isMedia) {
         const splitFile = file.split('.');
         const extension = splitFile.at(-1);
         splitFile.splice(splitFile.length - 1, 1);
         const fileName = splitFile.join('.') + Bun.randomUUIDv7() + '.' + extension;
-        fileLocations.push({ path: filePath, fileName, fileSize });
+        fileLocations.push({ path: filePath, fileName, fileSize, hash });
       }
       const isFolder = await checkIsFolder(filePath);
       if (isFolder) {
@@ -116,6 +138,16 @@ async function init() {
     const path = jspath.join(process.cwd(), dir!);
     const destination = jspath.join(process.cwd(), dest!);
     await updateLocations(path);
+
+    // deduplicate file locations
+    fileLocations = fileLocations.reduce((acc, file) => {
+      const alreadyExists = acc.find(f => f.hash === file.hash);
+      if (!alreadyExists) {
+        acc.push(file);
+      }
+      return acc;
+    }, [] as FileLocation[]);
+
     console.log('Copying files to location');
     const batchFileLocations = chunkArray<FileLocation>(fileLocations, 10_000);
     for (let [index, files] of batchFileLocations.entries()) {
